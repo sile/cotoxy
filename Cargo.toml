@@ -7,8 +7,11 @@ authors = ["Takeru Ohta <phjgt308@gmail.com>"]
 clap = "2"
 fibers = "0.1"
 futures = "0.1"
+handy_async = "0.2"
 miasht = "0.0"
 serde = "1"
 serde_derive = "1"
 serdeconv = "0.3"
+slog = {version = "2", features = ["release_max_level_debug"]}
+sloggers = "0.2"
 trackable = "0.2"

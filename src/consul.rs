@@ -9,6 +9,18 @@ use trackable::error::{ErrorKindExt, Failed};
 
 use {AsyncResult, Error};
 
+#[derive(Debug, Clone)]
+pub struct ConsulConfig {
+    service: String,
+}
+impl ConsulConfig {
+    pub fn new(service: &str) -> Self {
+        ConsulConfig {
+            service: service.to_owned(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ConsulClient {
     agent_addr: SocketAddr,
@@ -71,11 +83,17 @@ pub struct ServiceNode {
     #[serde(rename = "Datacenter")]
     pub datacenter: String,
 
+    #[serde(rename = "ServiceAddress")]
+    pub service_address: Option<IpAddr>,
+
     #[serde(rename = "ServicePort")]
     pub service_port: u16, // TODO: other field
 }
 impl ServiceNode {
     pub fn socket_addr(&self) -> SocketAddr {
-        SocketAddr::new(self.address, self.service_port)
+        SocketAddr::new(
+            self.service_address.unwrap_or(self.address),
+            self.service_port,
+        )
     }
 }
