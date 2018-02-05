@@ -1,20 +1,20 @@
 use std::net::SocketAddr;
 use fibers::Spawn;
-use fibers::net::TcpListener;
+use fibers::net::{TcpListener, TcpStream};
 use fibers::net::futures::TcpListenerBind;
 use fibers::net::streams::Incoming;
 use futures::{Async, Future, Poll, Stream};
 use slog::{Discard, Logger};
 
 use Error;
-use consul::ConsulConfig;
+use consul::{ConsulClient, ConsulClientBuilder};
 use proxy_channel::ProxyChannel;
 
 #[derive(Debug, Clone)]
 pub struct ProxyServerBuider {
     logger: Logger,
     bind_addr: SocketAddr,
-    consul: ConsulConfig,
+    consul: ConsulClientBuilder,
 }
 impl ProxyServerBuider {
     pub const DEFAULT_BIND_ADDR: &'static str = "0.0.0.0:17382";
@@ -23,7 +23,7 @@ impl ProxyServerBuider {
         ProxyServerBuider {
             logger: Logger::root(Discard, o!()),
             bind_addr: Self::DEFAULT_BIND_ADDR.parse().expect("Never fails"),
-            consul: ConsulConfig::new(service),
+            consul: ConsulClientBuilder::new(service),
         }
     }
 
@@ -37,11 +37,15 @@ impl ProxyServerBuider {
         self
     }
 
+    pub fn consul(&mut self) -> &mut ConsulClientBuilder {
+        &mut self.consul
+    }
+
     pub fn finish<S: Spawn>(&self, spawner: S) -> ProxyServer<S> {
         ProxyServer {
             logger: self.logger.clone(),
             spawner,
-            consul: self.consul.clone(),
+            consul: self.consul.finish(),
             bind: Some(TcpListener::bind(self.bind_addr)),
             incoming: None,
         }
@@ -51,7 +55,7 @@ impl ProxyServerBuider {
 pub struct ProxyServer<S> {
     logger: Logger,
     spawner: S,
-    consul: ConsulConfig,
+    consul: ConsulClient,
     bind: Option<TcpListenerBind>,
     incoming: Option<Incoming>,
 }
@@ -74,12 +78,14 @@ impl<S: Spawn> Future for ProxyServer<S> {
             {
                 let logger = self.logger.new(o!("client" => addr.to_string()));
                 let error_logger = logger.clone();
-                // let service = self.service.clone();
+                let server = SelectServer::new(&self.consul);
                 self.spawner.spawn(
                     track_err!(client)
                         .and_then(move |client| {
-                            let server = panic!();
-                            track_err!(ProxyChannel::new(logger, client, server))
+                            track_err!(server).and_then(move |(server, addr)| {
+                                let logger = logger.new(o!("server" => addr.to_string()));
+                                track_err!(ProxyChannel::new(logger, client, server))
+                            })
                         })
                         .map_err(move |e| {
                             error!(error_logger, "{}", e);
@@ -88,5 +94,19 @@ impl<S: Spawn> Future for ProxyServer<S> {
             }
         }
         Ok(Async::NotReady)
+    }
+}
+
+struct SelectServer {}
+impl SelectServer {
+    fn new(consul: &ConsulClient) -> Self {
+        panic!()
+    }
+}
+impl Future for SelectServer {
+    type Item = (TcpStream, SocketAddr);
+    type Error = Error;
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        panic!()
     }
 }

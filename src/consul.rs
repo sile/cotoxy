@@ -10,13 +10,29 @@ use trackable::error::{ErrorKindExt, Failed};
 use {AsyncResult, Error};
 
 #[derive(Debug, Clone)]
-pub struct ConsulConfig {
+pub struct ConsulClientBuilder {
+    agent_addr: SocketAddr,
     service: String,
 }
-impl ConsulConfig {
+impl ConsulClientBuilder {
+    pub const DEFAULT_AGENT_ADDR: &'static str = "127.0.0.1:8500";
+
     pub fn new(service: &str) -> Self {
-        ConsulConfig {
+        ConsulClientBuilder {
+            agent_addr: Self::DEFAULT_AGENT_ADDR.parse().expect("Never fails"),
             service: service.to_owned(),
+        }
+    }
+
+    pub fn agent_addr(&mut self, addr: SocketAddr) -> &mut Self {
+        self.agent_addr = addr;
+        self
+    }
+
+    pub fn finish(&self) -> ConsulClient {
+        ConsulClient {
+            agent_addr: self.agent_addr,
+            service: self.service.clone(),
         }
     }
 }
@@ -24,15 +40,28 @@ impl ConsulConfig {
 #[derive(Debug)]
 pub struct ConsulClient {
     agent_addr: SocketAddr,
+    service: String,
 }
 impl ConsulClient {
     pub fn new(agent_addr: SocketAddr) -> Self {
-        ConsulClient { agent_addr }
+        ConsulClient {
+            agent_addr,
+            service: "foo".to_owned(),
+        }
     }
     pub fn find_service_nodes(&self, service: &str) -> AsyncResult<Vec<ServiceNode>> {
         let future = http_get(
             self.agent_addr,
             format!("/v1/catalog/service/{}?near=_agent", service),
+        ).and_then(|body| {
+            track!(serdeconv::from_json_slice(&body).map_err(|e| Error::from(Failed.takes_over(e))))
+        });
+        Box::new(future)
+    }
+    pub fn find_candidates(&self) -> AsyncResult<Vec<ServiceNode>> {
+        let future = http_get(
+            self.agent_addr,
+            format!("/v1/catalog/service/{}?near=_agent", self.service),
         ).and_then(|body| {
             track!(serdeconv::from_json_slice(&body).map_err(|e| Error::from(Failed.takes_over(e))))
         });
