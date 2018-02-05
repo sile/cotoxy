@@ -3,6 +3,9 @@ extern crate cotoxy;
 extern crate fibers;
 extern crate futures;
 #[macro_use]
+extern crate slog;
+extern crate sloggers;
+#[macro_use]
 extern crate trackable;
 
 use std::net::SocketAddr;
@@ -13,9 +16,18 @@ use fibers::{Executor, Spawn};
 use fibers::executor::InPlaceExecutor;
 use fibers::net::TcpListener;
 use futures::{Future, Stream};
+use sloggers::Build;
+use sloggers::terminal::{Destination, TerminalLoggerBuilder};
+use sloggers::types::SourceLocation;
+
+macro_rules! try_parse {
+    ($expr:expr) => { track_try_unwrap!($expr.parse().map_err(Error::from)) }
+}
 
 fn main() {
     let matches = App::new("cotoxy")
+        .version(env!("CARGO_PKG_VERSION"))
+        .about(env!("CARGO_PKG_DESCRIPTION"))
         .arg(
             Arg::with_name("BIND_ADDR")
                 .long("bind-addr")
@@ -35,34 +47,38 @@ fn main() {
                 .takes_value(true)
                 .required(true),
         )
+        .arg(
+            Arg::with_name("LOG_LEVEL")
+                .long("log-level")
+                .takes_value(true)
+                .default_value("info")
+                .possible_values(&["debug", "info", "warning", "error"]),
+        )
         .get_matches();
-    let bind_addr: SocketAddr = track_try_unwrap!(
-        matches
-            .value_of("BIND_ADDR")
-            .unwrap()
-            .parse()
-            .map_err(Error::from_error)
-    );
-    let consul_addr: SocketAddr = track_try_unwrap!(
-        matches
-            .value_of("CONSUL_ADDR")
-            .unwrap()
-            .parse()
-            .map_err(Error::from_error)
-    );
+    let bind_addr: SocketAddr = try_parse!(matches.value_of("BIND_ADDR").unwrap());
+    let consul_addr: SocketAddr = try_parse!(matches.value_of("CONSUL_ADDR").unwrap());
     let service = matches.value_of("SERVICE").unwrap().to_owned();
+    let log_level = try_parse!(matches.value_of("LOG_LEVEL").unwrap());
+    let logger = track_try_unwrap!(
+        TerminalLoggerBuilder::new()
+            .source_location(SourceLocation::None)
+            .destination(Destination::Stderr)
+            .level(log_level)
+            .build()
+    );
 
     let mut executor = InPlaceExecutor::new().unwrap();
 
+    let logger = logger.new(o!("proxy" => bind_addr.to_string(), "service" => service.clone()));
     let spawner = executor.handle();
     let fiber = executor.spawn_monitor(
         TcpListener::bind(bind_addr)
-            .map_err(|e| track!(Error::from_error(e)))
+            .map_err(|e| track!(Error::from(e)))
             .and_then(move |listener| {
-                println!("# Start listening: {:?}", listener.local_addr().ok());
+                info!(logger, "Proxy server started");
                 listener
                     .incoming()
-                    .map_err(|e| track!(Error::from_error(e)))
+                    .map_err(|e| track!(Error::from(e)))
                     .for_each(move |(client, _)| {
                         let service = service.clone();
                         spawner.spawn(client.map_err(|e| println!("# Error: {}", e)).and_then(
@@ -75,10 +91,5 @@ fn main() {
                     })
             }),
     );
-    track_try_unwrap!(
-        executor
-            .run_fiber(fiber)
-            .unwrap()
-            .map_err(Error::from_error)
-    );
+    track_try_unwrap!(executor.run_fiber(fiber).unwrap().map_err(Error::from));
 }

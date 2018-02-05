@@ -81,7 +81,7 @@ impl Future for Proxy {
                         if e.kind() == io::ErrorKind::WouldBlock {
                             self.buf0.truncate(0);
                         } else {
-                            return Err(track!(Error::from_error(e)));
+                            return Err(track!(Error::from(e)));
                         }
                     }
                     Ok(0) => {
@@ -97,7 +97,7 @@ impl Future for Proxy {
                 match self.peer.as_mut().unwrap().write(&self.buf0) {
                     Err(e) => {
                         if e.kind() != io::ErrorKind::WouldBlock {
-                            return Err(track!(Error::from_error(e)));
+                            return Err(track!(Error::from(e)));
                         }
                     }
                     Ok(size) => {
@@ -114,7 +114,7 @@ impl Future for Proxy {
                         if e.kind() == io::ErrorKind::WouldBlock {
                             self.buf1.truncate(0);
                         } else {
-                            return Err(track!(Error::from_error(e)));
+                            return Err(track!(Error::from(e)));
                         }
                     }
                     Ok(0) => {
@@ -130,7 +130,7 @@ impl Future for Proxy {
                 match self.client.write(&self.buf1) {
                     Err(e) => {
                         if e.kind() != io::ErrorKind::WouldBlock {
-                            return Err(track!(Error::from_error(e)));
+                            return Err(track!(Error::from(e)));
                         }
                     }
                     Ok(size) => {
