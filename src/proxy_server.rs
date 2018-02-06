@@ -72,6 +72,7 @@ impl<S: Spawn> Future for ProxyServer<S> {
         if let Async::Ready(Some(listener)) = track!(self.bind.poll().map_err(Error::from))? {
             info!(self.logger, "Proxy server started");
             self.incoming = Some(listener.incoming());
+            self.bind = None;
         }
         if let Some(ref mut incoming) = self.incoming {
             if let Async::Ready(Some((client, addr))) =
@@ -121,14 +122,14 @@ impl Future for SelectServer {
     type Error = Error;
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         if let Async::Ready(Some(candidates)) = track!(self.collect_candidates.poll())? {
-            info!(self.logger, "Candidate servers: {:?}", candidates);
+            debug!(self.logger, "Candidate servers: {:?}", candidates);
             self.candidates = candidates;
             self.candidates.reverse();
             self.collect_candidates = None;
         }
         if self.collect_candidates.is_none() && self.connect.is_none() {
             let candidate = track_assert_some!(self.candidates.pop(), Failed);
-            info!(self.logger, "Next candidate: {:?}", candidate);
+            debug!(self.logger, "Next candidate: {:?}", candidate);
             self.server = candidate.socket_addr();
             self.connect = Some(TcpStream::connect(self.server));
         }

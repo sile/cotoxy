@@ -1,9 +1,12 @@
+use std;
 use std::net::{IpAddr, SocketAddr};
 use futures::Future;
 use miasht::Client as HttpClient;
 use miasht::Method;
 use miasht::builtin::headers::ContentLength;
 use miasht::builtin::{FutureExt, IoExt};
+use serde::de;
+use serde::{Deserialize, Deserializer};
 use serdeconv;
 use trackable::error::{ErrorKindExt, Failed};
 
@@ -112,7 +115,7 @@ pub struct ServiceNode {
     #[serde(rename = "Datacenter")]
     pub datacenter: String,
 
-    #[serde(rename = "ServiceAddress")]
+    #[serde(rename = "ServiceAddress", deserialize_with = "deserialize_maybe_ipaddr")]
     pub service_address: Option<IpAddr>,
 
     #[serde(rename = "ServicePort")]
@@ -124,5 +127,20 @@ impl ServiceNode {
             self.service_address.unwrap_or(self.address),
             self.service_port,
         )
+    }
+}
+
+fn deserialize_maybe_ipaddr<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<IpAddr>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let addr = String::deserialize(deserializer)?;
+    if addr.is_empty() {
+        Ok(None)
+    } else {
+        let addr = addr.parse().map_err(|e| de::Error::custom(e))?;
+        Ok(Some(addr))
     }
 }

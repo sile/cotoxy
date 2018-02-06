@@ -11,11 +11,9 @@ extern crate trackable;
 use std::net::SocketAddr;
 use clap::{App, Arg};
 use cotoxy::Error;
-use cotoxy::proxy::Proxy;
+use cotoxy::ProxyServerBuider;
 use fibers::{Executor, Spawn};
 use fibers::executor::InPlaceExecutor;
-use fibers::net::TcpListener;
-use futures::{Future, Stream};
 use sloggers::Build;
 use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::SourceLocation;
@@ -56,7 +54,7 @@ fn main() {
         )
         .get_matches();
     let bind_addr: SocketAddr = try_parse!(matches.value_of("BIND_ADDR").unwrap());
-    let consul_addr: SocketAddr = try_parse!(matches.value_of("CONSUL_ADDR").unwrap());
+    let _consul_addr: SocketAddr = try_parse!(matches.value_of("CONSUL_ADDR").unwrap());
     let service = matches.value_of("SERVICE").unwrap().to_owned();
     let log_level = try_parse!(matches.value_of("LOG_LEVEL").unwrap());
     let logger = track_try_unwrap!(
@@ -68,28 +66,11 @@ fn main() {
     );
 
     let mut executor = InPlaceExecutor::new().unwrap();
-
     let logger = logger.new(o!("proxy" => bind_addr.to_string(), "service" => service.clone()));
-    let spawner = executor.handle();
-    let fiber = executor.spawn_monitor(
-        TcpListener::bind(bind_addr)
-            .map_err(|e| track!(Error::from(e)))
-            .and_then(move |listener| {
-                info!(logger, "Proxy server started");
-                listener
-                    .incoming()
-                    .map_err(|e| track!(Error::from(e)))
-                    .for_each(move |(client, _)| {
-                        let service = service.clone();
-                        spawner.spawn(client.map_err(|e| println!("# Error: {}", e)).and_then(
-                            move |client| {
-                                Proxy::new(client, consul_addr, service)
-                                    .map_err(|e| println!("{}", track!(e)))
-                            },
-                        ));
-                        Ok(())
-                    })
-            }),
-    );
+    let proxy = ProxyServerBuider::new(&service)
+        .logger(logger)
+        .bind_addr(bind_addr)
+        .finish(executor.handle());
+    let fiber = executor.spawn_monitor(proxy);
     track_try_unwrap!(executor.run_fiber(fiber).unwrap().map_err(Error::from));
 }

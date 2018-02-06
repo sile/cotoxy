@@ -29,9 +29,7 @@ macro_rules! track_err {
 pub use error::Error;
 pub use proxy_server::{ProxyServer, ProxyServerBuider};
 
-pub mod consul;
-pub mod proxy;
-
+mod consul;
 mod error;
 mod proxy_channel;
 mod proxy_server;
