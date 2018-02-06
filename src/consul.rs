@@ -1,4 +1,5 @@
 use std;
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use futures::Future;
 use miasht::Client as HttpClient;
@@ -101,6 +102,7 @@ fn http_get(addr: SocketAddr, path: String) -> AsyncResult<Vec<u8>> {
     Box::new(future)
 }
 
+// https://www.consul.io/api/catalog.html#sample-response-3
 #[derive(Debug, Deserialize)]
 pub struct ServiceNode {
     #[serde(rename = "ID")]
@@ -115,11 +117,35 @@ pub struct ServiceNode {
     #[serde(rename = "Datacenter")]
     pub datacenter: String,
 
+    #[serde(rename = "TaggedAddresses")]
+    pub tagged_addresses: TaggedAddresses,
+
+    #[serde(rename = "NodeMeta")]
+    pub node_meta: HashMap<String, String>,
+
+    #[serde(rename = "CreateIndex")]
+    pub create_index: u64,
+
+    #[serde(rename = "ModifyIndex")]
+    pub modify_index: u64,
+
     #[serde(rename = "ServiceAddress", deserialize_with = "deserialize_maybe_ipaddr")]
     pub service_address: Option<IpAddr>,
 
+    #[serde(rename = "ServiceEnableTagOverride")]
+    pub service_enable_tag_override: bool,
+
+    #[serde(rename = "ServiceID")]
+    pub service_id: String,
+
+    #[serde(rename = "ServiceName")]
+    pub service_name: String,
+
     #[serde(rename = "ServicePort")]
-    pub service_port: u16, // TODO: other field
+    pub service_port: u16, // TODO: option
+
+    #[serde(rename = "ServiceTags")]
+    pub service_tags: Vec<String>,
 }
 impl ServiceNode {
     pub fn socket_addr(&self) -> SocketAddr {
@@ -128,6 +154,12 @@ impl ServiceNode {
             self.service_port,
         )
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TaggedAddresses {
+    pub lan: IpAddr,
+    pub wan: IpAddr,
 }
 
 fn deserialize_maybe_ipaddr<'de, D>(
