@@ -1,13 +1,14 @@
 use std::net::SocketAddr;
 use fibers::Spawn;
 use fibers::net::{TcpListener, TcpStream};
-use fibers::net::futures::TcpListenerBind;
+use fibers::net::futures::{Connect, TcpListenerBind};
 use fibers::net::streams::Incoming;
 use futures::{Async, Future, Poll, Stream};
 use slog::{Discard, Logger};
+use trackable::error::Failed;
 
-use Error;
-use consul::{ConsulClient, ConsulClientBuilder};
+use {AsyncResult, Error};
+use consul::{ConsulClient, ConsulClientBuilder, ServiceNode};
 use proxy_channel::ProxyChannel;
 
 #[derive(Debug, Clone)]
@@ -78,7 +79,7 @@ impl<S: Spawn> Future for ProxyServer<S> {
             {
                 let logger = self.logger.new(o!("client" => addr.to_string()));
                 let error_logger = logger.clone();
-                let server = SelectServer::new(&self.consul);
+                let server = SelectServer::new(self.logger.clone(), &self.consul);
                 self.spawner.spawn(
                     track_err!(client)
                         .and_then(move |client| {
@@ -97,16 +98,50 @@ impl<S: Spawn> Future for ProxyServer<S> {
     }
 }
 
-struct SelectServer {}
+struct SelectServer {
+    logger: Logger,
+    collect_candidates: Option<AsyncResult<Vec<ServiceNode>>>,
+    connect: Option<Connect>,
+    server: SocketAddr,
+    candidates: Vec<ServiceNode>,
+}
 impl SelectServer {
-    fn new(consul: &ConsulClient) -> Self {
-        panic!()
+    fn new(logger: Logger, consul: &ConsulClient) -> Self {
+        SelectServer {
+            logger,
+            collect_candidates: Some(consul.find_candidates()),
+            connect: None,
+            server: "127.0.0.1:80".parse().expect("Never fails"), // dummy
+            candidates: Vec::new(),
+        }
     }
 }
 impl Future for SelectServer {
     type Item = (TcpStream, SocketAddr);
     type Error = Error;
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        panic!()
+        if let Async::Ready(Some(candidates)) = track!(self.collect_candidates.poll())? {
+            info!(self.logger, "Candidate servers: {:?}", candidates);
+            self.candidates = candidates;
+            self.candidates.reverse();
+            self.collect_candidates = None;
+        }
+        if self.collect_candidates.is_none() && self.connect.is_none() {
+            let candidate = track_assert_some!(self.candidates.pop(), Failed);
+            info!(self.logger, "Next candidate: {:?}", candidate);
+            self.server = candidate.socket_addr();
+            self.connect = Some(TcpStream::connect(self.server));
+        }
+        match track!(self.connect.poll().map_err(Error::from)) {
+            Err(e) => {
+                warn!(self.logger, "Cannot connect a server: {}", e);
+                self.poll()
+            }
+            Ok(Async::Ready(Some(stream))) => {
+                info!(self.logger, "Connected to the server {}", self.server);
+                Ok(Async::Ready((stream, self.server)))
+            }
+            _ => Ok(Async::NotReady),
+        }
     }
 }
