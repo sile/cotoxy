@@ -11,15 +11,8 @@ extern crate slog;
 extern crate sloggers;
 #[macro_use]
 extern crate trackable;
+extern crate url;
 
-// macro_rules! async {
-//     ($e:expr) => {
-//         {
-//             let future = $e.map_err(|e| track!(::Error::from(e)));
-//             Box::new(future)
-//         }
-//     }
-// }
 macro_rules! track_err {
     ($future:expr) => {
         $future.map_err(|e| track!(::Error::from(e)))

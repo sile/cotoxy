@@ -17,6 +17,11 @@ impl From<std::net::AddrParseError> for Error {
         Failed.cause(f).into()
     }
 }
+impl From<std::num::ParseIntError> for Error {
+    fn from(f: std::num::ParseIntError) -> Self {
+        Failed.cause(f).into()
+    }
+}
 impl From<sloggers::Error> for Error {
     fn from(f: sloggers::Error) -> Self {
         Failed.cause(f).into()

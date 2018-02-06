@@ -15,3 +15,4 @@ serdeconv = "0.3"
 slog = {version = "2", features = ["release_max_level_debug"]}
 sloggers = "0.2"
 trackable = "0.2"
+url = "1"

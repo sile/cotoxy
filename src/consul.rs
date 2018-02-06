@@ -10,63 +10,105 @@ use serde::de;
 use serde::{Deserialize, Deserializer};
 use serdeconv;
 use trackable::error::{ErrorKindExt, Failed};
+use url::Url;
 
 use {AsyncResult, Error};
 
 #[derive(Debug, Clone)]
 pub struct ConsulClientBuilder {
-    agent_addr: SocketAddr,
+    consul_addr: SocketAddr,
     service: String,
+    dc: Option<String>,
+    tag: Option<String>,
+    near: Option<String>,
+    node_meta: Vec<(String, String)>,
 }
 impl ConsulClientBuilder {
-    pub const DEFAULT_AGENT_ADDR: &'static str = "127.0.0.1:8500";
+    pub const DEFAULT_CONSUL_ADDR: &'static str = "127.0.0.1:8500";
 
     pub fn new(service: &str) -> Self {
         ConsulClientBuilder {
-            agent_addr: Self::DEFAULT_AGENT_ADDR.parse().expect("Never fails"),
+            consul_addr: Self::DEFAULT_CONSUL_ADDR.parse().expect("Never fails"),
             service: service.to_owned(),
+            dc: None,
+            tag: None,
+            near: None,
+            node_meta: Vec::new(),
         }
     }
 
-    pub fn agent_addr(&mut self, addr: SocketAddr) -> &mut Self {
-        self.agent_addr = addr;
+    pub fn consul_addr(&mut self, addr: SocketAddr) -> &mut Self {
+        self.consul_addr = addr;
+        self
+    }
+
+    pub fn dc(&mut self, dc: &str) -> &mut Self {
+        self.dc = Some(dc.to_owned());
+        self
+    }
+
+    pub fn tag(&mut self, tag: &str) -> &mut Self {
+        self.tag = Some(tag.to_owned());
+        self
+    }
+
+    pub fn near(&mut self, near: &str) -> &mut Self {
+        self.near = Some(near.to_owned());
+        self
+    }
+
+    pub fn add_node_meta(&mut self, key: &str, value: &str) -> &mut Self {
+        self.node_meta.push((key.to_owned(), value.to_owned()));
         self
     }
 
     pub fn finish(&self) -> ConsulClient {
         ConsulClient {
-            agent_addr: self.agent_addr,
+            consul_addr: self.consul_addr,
             service: self.service.clone(),
+            dc: self.dc.clone(),
+            tag: self.tag.clone(),
+            near: self.near.clone(),
+            node_meta: self.node_meta.clone(),
         }
     }
 }
 
 #[derive(Debug)]
 pub struct ConsulClient {
-    agent_addr: SocketAddr,
+    consul_addr: SocketAddr,
     service: String,
+    dc: Option<String>,
+    tag: Option<String>,
+    near: Option<String>,
+    node_meta: Vec<(String, String)>,
 }
 impl ConsulClient {
-    pub fn new(agent_addr: SocketAddr) -> Self {
-        ConsulClient {
-            agent_addr,
-            service: "foo".to_owned(),
-        }
-    }
-    pub fn find_service_nodes(&self, service: &str) -> AsyncResult<Vec<ServiceNode>> {
-        let future = http_get(
-            self.agent_addr,
-            format!("/v1/catalog/service/{}?near=_agent", service),
-        ).and_then(|body| {
-            track!(serdeconv::from_json_slice(&body).map_err(|e| Error::from(Failed.takes_over(e))))
-        });
-        Box::new(future)
-    }
     pub fn find_candidates(&self) -> AsyncResult<Vec<ServiceNode>> {
-        let future = http_get(
-            self.agent_addr,
-            format!("/v1/catalog/service/{}?near=_agent", self.service),
-        ).and_then(|body| {
+        let mut url = Url::parse("http://dummy/v1/catalog/service").expect("Never fails");
+        url.path_segments_mut()
+            .expect("Never fails")
+            .push(&self.service);
+        if let Some(ref dc) = self.dc {
+            url.query_pairs_mut().append_pair("dc", dc);
+        }
+        if let Some(ref tag) = self.tag {
+            url.query_pairs_mut().append_pair("tag", tag);
+        }
+        if let Some(ref near) = self.near {
+            url.query_pairs_mut().append_pair("near", near);
+        }
+        for &(ref k, ref v) in &self.node_meta {
+            url.query_pairs_mut()
+                .append_pair("node_meta", &format!("{}:{}", k, v));
+        }
+        let mut path = url.path().to_owned();
+        if let Some(query) = url.query() {
+            path.push_str("?");
+            path.push_str(query);
+        }
+        println!("# {}/{}", self.consul_addr, path);
+        let future = http_get(self.consul_addr, path).and_then(|body| {
             track!(serdeconv::from_json_slice(&body).map_err(|e| Error::from(Failed.takes_over(e))))
         });
         Box::new(future)

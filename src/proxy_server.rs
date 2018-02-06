@@ -16,6 +16,7 @@ pub struct ProxyServerBuider {
     logger: Logger,
     bind_addr: SocketAddr,
     consul: ConsulClientBuilder,
+    service_port: Option<u16>,
 }
 impl ProxyServerBuider {
     pub const DEFAULT_BIND_ADDR: &'static str = "0.0.0.0:17382";
@@ -25,6 +26,7 @@ impl ProxyServerBuider {
             logger: Logger::root(Discard, o!()),
             bind_addr: Self::DEFAULT_BIND_ADDR.parse().expect("Never fails"),
             consul: ConsulClientBuilder::new(service),
+            service_port: None,
         }
     }
 
@@ -35,6 +37,11 @@ impl ProxyServerBuider {
 
     pub fn bind_addr(&mut self, addr: SocketAddr) -> &mut Self {
         self.bind_addr = addr;
+        self
+    }
+
+    pub fn service_port(&mut self, port: u16) -> &mut Self {
+        self.service_port = Some(port);
         self
     }
 
@@ -49,6 +56,7 @@ impl ProxyServerBuider {
             consul: self.consul.finish(),
             bind: Some(TcpListener::bind(self.bind_addr)),
             incoming: None,
+            service_port: self.service_port,
         }
     }
 }
@@ -59,6 +67,7 @@ pub struct ProxyServer<S> {
     consul: ConsulClient,
     bind: Option<TcpListenerBind>,
     incoming: Option<Incoming>,
+    service_port: Option<u16>,
 }
 impl<S: Spawn> ProxyServer<S> {
     pub fn new(spawner: S, service: &str) -> Self {
@@ -80,7 +89,8 @@ impl<S: Spawn> Future for ProxyServer<S> {
             {
                 let logger = self.logger.new(o!("client" => addr.to_string()));
                 let error_logger = logger.clone();
-                let server = SelectServer::new(self.logger.clone(), &self.consul);
+                let server =
+                    SelectServer::new(self.logger.clone(), &self.consul, self.service_port);
                 self.spawner.spawn(
                     track_err!(client)
                         .and_then(move |client| {
@@ -105,15 +115,17 @@ struct SelectServer {
     connect: Option<Connect>,
     server: SocketAddr,
     candidates: Vec<ServiceNode>,
+    service_port: Option<u16>,
 }
 impl SelectServer {
-    fn new(logger: Logger, consul: &ConsulClient) -> Self {
+    fn new(logger: Logger, consul: &ConsulClient, service_port: Option<u16>) -> Self {
         SelectServer {
             logger,
             collect_candidates: Some(consul.find_candidates()),
             connect: None,
             server: "127.0.0.1:80".parse().expect("Never fails"), // dummy
             candidates: Vec::new(),
+            service_port,
         }
     }
 }
@@ -131,11 +143,15 @@ impl Future for SelectServer {
             let candidate = track_assert_some!(self.candidates.pop(), Failed);
             debug!(self.logger, "Next candidate: {:?}", candidate);
             self.server = candidate.socket_addr();
+            if let Some(port) = self.service_port {
+                self.server.set_port(port);
+            }
             self.connect = Some(TcpStream::connect(self.server));
         }
         match track!(self.connect.poll().map_err(Error::from)) {
             Err(e) => {
-                warn!(self.logger, "Cannot connect a server: {}", e);
+                warn!(self.logger, "Cannot connect to a server: {}", e);
+                self.connect = None;
                 self.poll()
             }
             Ok(Async::Ready(Some(stream))) => {
