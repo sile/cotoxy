@@ -23,11 +23,12 @@ macro_rules! track_err {
 }
 
 pub use error::Error;
-pub use consul::ConsulClientBuilder;
+pub use consul::ConsulSettings;
 pub use proxy_server::{ProxyServer, ProxyServerBuilder};
 
 mod consul;
 mod error;
+mod http;
 mod proxy_channel;
 mod proxy_server;
 

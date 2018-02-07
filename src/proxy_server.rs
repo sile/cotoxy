@@ -9,8 +9,8 @@ use futures::{Async, Future, Poll, Stream};
 use slog::{Discard, Logger};
 use trackable::error::Failed;
 
-use {AsyncResult, Error};
-use consul::{ConsulClient, ConsulClientBuilder, ServiceNode};
+use {AsyncResult, ConsulSettings, Error};
+use consul::{ConsulClient, ServiceNode};
 use proxy_channel::ProxyChannel;
 
 /// A builder for `ProxyServer`.
@@ -18,7 +18,7 @@ use proxy_channel::ProxyChannel;
 pub struct ProxyServerBuilder {
     logger: Logger,
     bind_addr: SocketAddr,
-    consul: ConsulClientBuilder,
+    consul: ConsulSettings,
     service_port: Option<u16>,
     connect_timeout: Duration,
 }
@@ -34,7 +34,7 @@ impl ProxyServerBuilder {
         ProxyServerBuilder {
             logger: Logger::root(Discard, o!()),
             bind_addr: Self::DEFAULT_BIND_ADDR.parse().expect("Never fails"),
-            consul: ConsulClientBuilder::new(service),
+            consul: ConsulSettings::new(service),
             service_port: None,
             connect_timeout: Duration::from_millis(Self::DEFAULT_CONNECT_TIMEOUT_MS),
         }
@@ -73,16 +73,18 @@ impl ProxyServerBuilder {
     }
 
     /// Returns the mutable reference to `ConsulClientBuilder`.
-    pub fn consul(&mut self) -> &mut ConsulClientBuilder {
+    pub fn consul(&mut self) -> &mut ConsulSettings {
         &mut self.consul
     }
 
     /// Builds a new proxy server with the specified settings.
     pub fn finish<S: Spawn>(&self, spawner: S) -> ProxyServer<S> {
+        let consul = self.consul.client();
+        debug!(self.logger, "Consul query url: {}", consul.query_url());
         ProxyServer {
             logger: self.logger.clone(),
             spawner,
-            consul: self.consul.finish(),
+            consul,
             bind: Some(TcpListener::bind(self.bind_addr)),
             incoming: None,
             service_port: self.service_port,

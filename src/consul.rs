@@ -2,10 +2,6 @@ use std;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use futures::Future;
-use miasht::Client as HttpClient;
-use miasht::Method;
-use miasht::builtin::headers::ContentLength;
-use miasht::builtin::{FutureExt, IoExt};
 use serde::de;
 use serde::{Deserialize, Deserializer};
 use serdeconv;
@@ -13,9 +9,11 @@ use trackable::error::{ErrorKindExt, Failed};
 use url::Url;
 
 use {AsyncResult, Error};
+use http;
 
+/// Settings for Consul.
 #[derive(Debug, Clone)]
-pub struct ConsulClientBuilder {
+pub struct ConsulSettings {
     consul_addr: SocketAddr,
     service: String,
     dc: Option<String>,
@@ -23,11 +21,13 @@ pub struct ConsulClientBuilder {
     near: Option<String>,
     node_meta: Vec<(String, String)>,
 }
-impl ConsulClientBuilder {
+impl ConsulSettings {
+    /// The default consul agent address.
     pub const DEFAULT_CONSUL_ADDR: &'static str = "127.0.0.1:8500";
 
+    /// Makes a new `ConsulSettings` instance.
     pub fn new(service: &str) -> Self {
-        ConsulClientBuilder {
+        ConsulSettings {
             consul_addr: Self::DEFAULT_CONSUL_ADDR.parse().expect("Never fails"),
             service: service.to_owned(),
             dc: None,
@@ -37,55 +37,56 @@ impl ConsulClientBuilder {
         }
     }
 
+    /// Sets the address of the consul agent used by `ProxyServer`.
+    ///
+    /// The default value is `ConsulSettings::DEFAULT_CONSUL_ADDR`.
     pub fn consul_addr(&mut self, addr: SocketAddr) -> &mut Self {
         self.consul_addr = addr;
         self
     }
 
+    /// Sets the value of the `dc` query parameter of [List Nodes for Service] API.
+    ///
+    /// [List Nodes for Service]: https://www.consul.io/api/catalog.html#list-nodes-for-service
     pub fn dc(&mut self, dc: &str) -> &mut Self {
         self.dc = Some(dc.to_owned());
         self
     }
 
+    /// Sets the value of the `tag` query parameter of [List Nodes for Service] API.
+    ///
+    /// [List Nodes for Service]: https://www.consul.io/api/catalog.html#list-nodes-for-service.
     pub fn tag(&mut self, tag: &str) -> &mut Self {
         self.tag = Some(tag.to_owned());
         self
     }
 
+    /// Sets the value of the `near` query parameter of [List Nodes for Service] API.
+    ///
+    /// [List Nodes for Service]: https://www.consul.io/api/catalog.html#list-nodes-for-service.
     pub fn near(&mut self, near: &str) -> &mut Self {
         self.near = Some(near.to_owned());
         self
     }
 
+    /// Adds an entry for the `node-meta` query parameter of [List Nodes for Service] API.
+    ///
+    /// [List Nodes for Service]: https://www.consul.io/api/catalog.html#list-nodes-for-service.
     pub fn add_node_meta(&mut self, key: &str, value: &str) -> &mut Self {
         self.node_meta.push((key.to_owned(), value.to_owned()));
         self
     }
 
-    pub fn finish(&self) -> ConsulClient {
+    pub(crate) fn client(&self) -> ConsulClient {
         ConsulClient {
             consul_addr: self.consul_addr,
-            service: self.service.clone(),
-            dc: self.dc.clone(),
-            tag: self.tag.clone(),
-            near: self.near.clone(),
-            node_meta: self.node_meta.clone(),
+            query_url: self.build_query_url(),
         }
     }
-}
 
-#[derive(Debug)]
-pub struct ConsulClient {
-    consul_addr: SocketAddr,
-    service: String,
-    dc: Option<String>,
-    tag: Option<String>,
-    near: Option<String>,
-    node_meta: Vec<(String, String)>,
-}
-impl ConsulClient {
-    pub fn find_candidates(&self) -> AsyncResult<Vec<ServiceNode>> {
-        let mut url = Url::parse("http://dummy/v1/catalog/service").expect("Never fails");
+    fn build_query_url(&self) -> Url {
+        let mut url = Url::parse(&format!("http://{}/v1/catalog/service", self.consul_addr))
+            .expect("Never fails");
         url.path_segments_mut()
             .expect("Never fails")
             .push(&self.service);
@@ -102,48 +103,28 @@ impl ConsulClient {
             url.query_pairs_mut()
                 .append_pair("node_meta", &format!("{}:{}", k, v));
         }
-        let mut path = url.path().to_owned();
-        if let Some(query) = url.query() {
-            path.push_str("?");
-            path.push_str(query);
-        }
-        let future = http_get(self.consul_addr, path).and_then(|body| {
+        url
+    }
+}
+
+#[derive(Debug)]
+pub struct ConsulClient {
+    consul_addr: SocketAddr,
+    query_url: Url,
+}
+impl ConsulClient {
+    pub fn find_candidates(&self) -> AsyncResult<Vec<ServiceNode>> {
+        let future = http::get(self.consul_addr, self.query_url.clone()).and_then(|body| {
             track!(serdeconv::from_json_slice(&body).map_err(|e| Error::from(Failed.takes_over(e))))
         });
         Box::new(future)
     }
+
+    pub fn query_url(&self) -> &Url {
+        &self.query_url
+    }
 }
 
-fn http_get(addr: SocketAddr, path: String) -> AsyncResult<Vec<u8>> {
-    let future = HttpClient::new()
-        .connect(addr)
-        .map_err(|e| track!(Error::from(Failed.takes_over(e))))
-        .and_then(move |connection| {
-            let mut req = connection.build_request(Method::Get, &path);
-            req.add_raw_header("Host", b"localhost");
-            req.add_header(&ContentLength(0));
-            req.finish()
-                .map_err(|e| track!(Error::from(Failed.takes_over(e))))
-        })
-        .and_then(|connection| {
-            connection
-                .read_response()
-                .map_err(|e| track!(Error::from(Failed.takes_over(e))))
-        })
-        .and_then(|res| {
-            res.into_body_reader()
-                .map_err(|e| track!(Error::from(Failed.takes_over(e))))
-        })
-        .and_then(|reader| {
-            reader
-                .read_all_bytes()
-                .map_err(|e| track!(Error::from(Failed.takes_over(e))))
-        })
-        .map(|(_, body)| body);
-    Box::new(future)
-}
-
-// https://www.consul.io/api/catalog.html#sample-response-3
 #[derive(Debug, Deserialize)]
 pub struct ServiceNode {
     #[serde(rename = "ID")]
