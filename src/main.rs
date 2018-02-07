@@ -9,6 +9,7 @@ extern crate sloggers;
 extern crate trackable;
 
 use std::net::SocketAddr;
+use std::time::Duration;
 use clap::{App, Arg};
 use cotoxy::Error;
 use cotoxy::ProxyServerBuilder;
@@ -103,11 +104,19 @@ fn main() {
                 .takes_value(true)
                 .default_value("1"),
         )
+        .arg(
+            Arg::with_name("CONNECT_TIMEOUT")
+                .help("TCP connect timeout in milliseconds")
+                .long("connect-timeout")
+                .takes_value(true)
+                .default_value("1000"),
+        )
         .get_matches();
     let bind_addr: SocketAddr = try_parse!(matches.value_of("BIND_ADDR").unwrap());
     let consul_addr: SocketAddr = try_parse!(matches.value_of("CONSUL_ADDR").unwrap());
     let service = matches.value_of("SERVICE").unwrap().to_owned();
     let threads: usize = try_parse!(matches.value_of("THREADS").unwrap());
+    let connect_timeout: u64 = try_parse!(matches.value_of("CONNECT_TIMEOUT").unwrap());
     let log_level = try_parse!(matches.value_of("LOG_LEVEL").unwrap());
     let logger = track_try_unwrap!(
         TerminalLoggerBuilder::new()
@@ -121,6 +130,7 @@ fn main() {
 
     let mut proxy = ProxyServerBuilder::new(&service);
     proxy.logger(logger).bind_addr(bind_addr);
+    proxy.connect_timeout(Duration::from_millis(connect_timeout));
 
     proxy.consul().consul_addr(consul_addr);
     if let Some(service_port) = matches.value_of("SERVICE_PORT") {

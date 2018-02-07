@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
+use std::time::Duration;
 use fibers::Spawn;
 use fibers::net::{TcpListener, TcpStream};
 use fibers::net::futures::{Connect, TcpListenerBind};
 use fibers::net::streams::Incoming;
+use fibers::time::timer::{TimeoutAfter, TimerExt};
 use futures::{Async, Future, Poll, Stream};
 use slog::{Discard, Logger};
 use trackable::error::Failed;
@@ -18,10 +20,14 @@ pub struct ProxyServerBuilder {
     bind_addr: SocketAddr,
     consul: ConsulClientBuilder,
     service_port: Option<u16>,
+    connect_timeout: Duration,
 }
 impl ProxyServerBuilder {
     /// The default address to which the proxy server bind.
     pub const DEFAULT_BIND_ADDR: &'static str = "0.0.0.0:17382";
+
+    /// The default timeout of a TCP connect operation.
+    pub const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 1000;
 
     /// Makes a new `ProxyServerBuilder` for the given service.
     pub fn new(service: &str) -> Self {
@@ -30,6 +36,7 @@ impl ProxyServerBuilder {
             bind_addr: Self::DEFAULT_BIND_ADDR.parse().expect("Never fails"),
             consul: ConsulClientBuilder::new(service),
             service_port: None,
+            connect_timeout: Duration::from_millis(Self::DEFAULT_CONNECT_TIMEOUT_MS),
         }
     }
 
@@ -57,6 +64,14 @@ impl ProxyServerBuilder {
         self
     }
 
+    /// Sets the timeout of a TCP connect operation.
+    ///
+    /// The default value is `Duration::from_millis(ProxyServerBuilder::DEFAULT_CONNECT_TIMEOUT_MS)`.
+    pub fn connect_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.connect_timeout = timeout;
+        self
+    }
+
     /// Returns the mutable reference to `ConsulClientBuilder`.
     pub fn consul(&mut self) -> &mut ConsulClientBuilder {
         &mut self.consul
@@ -71,6 +86,7 @@ impl ProxyServerBuilder {
             bind: Some(TcpListener::bind(self.bind_addr)),
             incoming: None,
             service_port: self.service_port,
+            connect_timeout: self.connect_timeout,
         }
     }
 }
@@ -83,6 +99,7 @@ pub struct ProxyServer<S> {
     bind: Option<TcpListenerBind>,
     incoming: Option<Incoming>,
     service_port: Option<u16>,
+    connect_timeout: Duration,
 }
 impl<S: Spawn> ProxyServer<S> {
     /// Makes a new `ProxyServer` for the given service with the default settings.
@@ -107,7 +124,12 @@ impl<S: Spawn> Future for ProxyServer<S> {
             {
                 let logger = self.logger.new(o!("client" => addr.to_string()));
                 let error_logger = logger.clone();
-                let server = SelectServer::new(logger.clone(), &self.consul, self.service_port);
+                let server = SelectServer::new(
+                    logger.clone(),
+                    &self.consul,
+                    self.service_port,
+                    self.connect_timeout,
+                );
                 self.spawner.spawn(
                     track_err!(client)
                         .and_then(move |client| {
@@ -117,7 +139,7 @@ impl<S: Spawn> Future for ProxyServer<S> {
                             })
                         })
                         .map_err(move |e| {
-                            error!(error_logger, "{}", e);
+                            error!(error_logger, "Proxy channel terminated abnormally: {}", e);
                         }),
                 );
             }
@@ -129,13 +151,19 @@ impl<S: Spawn> Future for ProxyServer<S> {
 struct SelectServer {
     logger: Logger,
     collect_candidates: Option<AsyncResult<Vec<ServiceNode>>>,
-    connect: Option<Connect>,
+    connect: Option<TimeoutAfter<Connect>>,
     candidates: Vec<ServiceNode>,
     server: Option<ServiceNode>,
     service_port: Option<u16>,
+    connect_timeout: Duration,
 }
 impl SelectServer {
-    fn new(logger: Logger, consul: &ConsulClient, service_port: Option<u16>) -> Self {
+    fn new(
+        logger: Logger,
+        consul: &ConsulClient,
+        service_port: Option<u16>,
+        connect_timeout: Duration,
+    ) -> Self {
         SelectServer {
             logger,
             collect_candidates: Some(consul.find_candidates()),
@@ -143,6 +171,7 @@ impl SelectServer {
             candidates: Vec::new(),
             server: None,
             service_port,
+            connect_timeout,
         }
     }
 }
@@ -164,17 +193,18 @@ impl Future for SelectServer {
             );
             let addr = candidate.socket_addr(self.service_port);
             debug!(self.logger, "Next candidate server is {}", addr);
-            self.connect = Some(TcpStream::connect(addr));
+            self.connect = Some(TcpStream::connect(addr).timeout_after(self.connect_timeout));
             self.server = Some(candidate);
         }
-        match track!(self.connect.poll().map_err(Error::from)) {
+        match self.connect.poll() {
             Err(e) => {
                 let server = self.server.take().expect("Never fails");
                 warn!(
                     self.logger,
                     "Cannot connect to the server {}; {}",
                     server.socket_addr(self.service_port),
-                    e
+                    e.map(|e| e.to_string())
+                        .unwrap_or_else(|| "Connection timeout".to_owned())
                 );
                 self.connect = None;
                 self.poll()
