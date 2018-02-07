@@ -11,7 +11,7 @@ extern crate trackable;
 use std::net::SocketAddr;
 use clap::{App, Arg};
 use cotoxy::Error;
-use cotoxy::ProxyServerBuider;
+use cotoxy::ProxyServerBuilder;
 use fibers::{Executor, Spawn};
 use fibers::executor::{InPlaceExecutor, ThreadPoolExecutor};
 use sloggers::Build;
@@ -119,7 +119,7 @@ fn main() {
 
     let logger = logger.new(o!("proxy" => bind_addr.to_string(), "service" => service.clone()));
 
-    let mut proxy = ProxyServerBuider::new(&service);
+    let mut proxy = ProxyServerBuilder::new(&service);
     proxy.logger(logger).bind_addr(bind_addr);
 
     proxy.consul().consul_addr(consul_addr);
@@ -159,7 +159,7 @@ fn main() {
     }
 }
 
-fn execute<E: Executor + Spawn>(mut executor: E, proxy: &ProxyServerBuider) {
+fn execute<E: Executor + Spawn>(mut executor: E, proxy: &ProxyServerBuilder) {
     let proxy = proxy.finish(executor.handle());
     let fiber = executor.spawn_monitor(proxy);
     track_try_unwrap!(executor.run_fiber(fiber).unwrap().map_err(Error::from));

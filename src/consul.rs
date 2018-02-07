@@ -107,7 +107,6 @@ impl ConsulClient {
             path.push_str("?");
             path.push_str(query);
         }
-        println!("# {}/{}", self.consul_addr, path);
         let future = http_get(self.consul_addr, path).and_then(|body| {
             track!(serdeconv::from_json_slice(&body).map_err(|e| Error::from(Failed.takes_over(e))))
         });
@@ -190,10 +189,10 @@ pub struct ServiceNode {
     pub service_tags: Vec<String>,
 }
 impl ServiceNode {
-    pub fn socket_addr(&self) -> SocketAddr {
+    pub fn socket_addr(&self, port: Option<u16>) -> SocketAddr {
         SocketAddr::new(
             self.service_address.unwrap_or(self.address),
-            self.service_port,
+            port.unwrap_or(self.service_port),
         )
     }
 }

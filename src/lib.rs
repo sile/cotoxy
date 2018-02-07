@@ -1,6 +1,9 @@
+//! A TCP proxy using [Consul][consul] for service discovery.
+//!
+//! [consul]: https://www.consul.io/
+#![warn(missing_docs)]
 extern crate fibers;
 extern crate futures;
-extern crate handy_async;
 extern crate miasht;
 extern crate serde;
 #[macro_use]
@@ -20,12 +23,15 @@ macro_rules! track_err {
 }
 
 pub use error::Error;
-pub use proxy_server::{ProxyServer, ProxyServerBuider};
+pub use consul::ConsulClientBuilder;
+pub use proxy_server::{ProxyServer, ProxyServerBuilder};
 
 mod consul;
 mod error;
 mod proxy_channel;
 mod proxy_server;
 
+/// This crate specific `Result` type.
 pub type Result<T> = std::result::Result<T, Error>;
-pub type AsyncResult<T> = Box<futures::Future<Item = T, Error = Error> + Send + 'static>;
+
+type AsyncResult<T> = Box<futures::Future<Item = T, Error = Error> + Send + 'static>;

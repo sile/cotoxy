@@ -11,18 +11,21 @@ use {AsyncResult, Error};
 use consul::{ConsulClient, ConsulClientBuilder, ServiceNode};
 use proxy_channel::ProxyChannel;
 
+/// A builder for `ProxyServer`.
 #[derive(Debug, Clone)]
-pub struct ProxyServerBuider {
+pub struct ProxyServerBuilder {
     logger: Logger,
     bind_addr: SocketAddr,
     consul: ConsulClientBuilder,
     service_port: Option<u16>,
 }
-impl ProxyServerBuider {
+impl ProxyServerBuilder {
+    /// The default address to which the proxy server bind.
     pub const DEFAULT_BIND_ADDR: &'static str = "0.0.0.0:17382";
 
+    /// Makes a new `ProxyServerBuilder` for the given service.
     pub fn new(service: &str) -> Self {
-        ProxyServerBuider {
+        ProxyServerBuilder {
             logger: Logger::root(Discard, o!()),
             bind_addr: Self::DEFAULT_BIND_ADDR.parse().expect("Never fails"),
             consul: ConsulClientBuilder::new(service),
@@ -30,25 +33,36 @@ impl ProxyServerBuider {
         }
     }
 
+    /// Sets the logger of the server.
+    ///
+    /// The default value is `Logger::root(Discard, o!())`.
     pub fn logger(&mut self, logger: Logger) -> &mut Self {
         self.logger = logger;
         self
     }
 
+    /// Sets the address to which the server bind.
+    ///
+    /// The default value is `ProxyServerBuilder::DEFAULT_BIND_ADDR`.
     pub fn bind_addr(&mut self, addr: SocketAddr) -> &mut Self {
         self.bind_addr = addr;
         self
     }
 
+    /// Sets the port number of the service handled by the proxy server.
+    ///
+    /// If omitted, the value of the selected node's `ServicePort` field registered in Consul will be used.
     pub fn service_port(&mut self, port: u16) -> &mut Self {
         self.service_port = Some(port);
         self
     }
 
+    /// Returns the mutable reference to `ConsulClientBuilder`.
     pub fn consul(&mut self) -> &mut ConsulClientBuilder {
         &mut self.consul
     }
 
+    /// Builds a new proxy server with the specified settings.
     pub fn finish<S: Spawn>(&self, spawner: S) -> ProxyServer<S> {
         ProxyServer {
             logger: self.logger.clone(),
@@ -61,6 +75,7 @@ impl ProxyServerBuider {
     }
 }
 
+/// Proxy server.
 pub struct ProxyServer<S> {
     logger: Logger,
     spawner: S,
@@ -70,8 +85,11 @@ pub struct ProxyServer<S> {
     service_port: Option<u16>,
 }
 impl<S: Spawn> ProxyServer<S> {
+    /// Makes a new `ProxyServer` for the given service with the default settings.
+    ///
+    /// This is equivalent to `ProxyServerBuilder::new(service).finish(spawner)`.
     pub fn new(spawner: S, service: &str) -> Self {
-        ProxyServerBuider::new(service).finish(spawner)
+        ProxyServerBuilder::new(service).finish(spawner)
     }
 }
 impl<S: Spawn> Future for ProxyServer<S> {
@@ -89,8 +107,7 @@ impl<S: Spawn> Future for ProxyServer<S> {
             {
                 let logger = self.logger.new(o!("client" => addr.to_string()));
                 let error_logger = logger.clone();
-                let server =
-                    SelectServer::new(self.logger.clone(), &self.consul, self.service_port);
+                let server = SelectServer::new(logger.clone(), &self.consul, self.service_port);
                 self.spawner.spawn(
                     track_err!(client)
                         .and_then(move |client| {
@@ -113,8 +130,8 @@ struct SelectServer {
     logger: Logger,
     collect_candidates: Option<AsyncResult<Vec<ServiceNode>>>,
     connect: Option<Connect>,
-    server: SocketAddr,
     candidates: Vec<ServiceNode>,
+    server: Option<ServiceNode>,
     service_port: Option<u16>,
 }
 impl SelectServer {
@@ -123,8 +140,8 @@ impl SelectServer {
             logger,
             collect_candidates: Some(consul.find_candidates()),
             connect: None,
-            server: "127.0.0.1:80".parse().expect("Never fails"), // dummy
             candidates: Vec::new(),
+            server: None,
             service_port,
         }
     }
@@ -134,29 +151,39 @@ impl Future for SelectServer {
     type Error = Error;
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         if let Async::Ready(Some(candidates)) = track!(self.collect_candidates.poll())? {
-            debug!(self.logger, "Candidate servers: {:?}", candidates);
+            debug!(self.logger, "Candidates: {:?}", candidates);
             self.candidates = candidates;
             self.candidates.reverse();
             self.collect_candidates = None;
         }
         if self.collect_candidates.is_none() && self.connect.is_none() {
-            let candidate = track_assert_some!(self.candidates.pop(), Failed);
-            debug!(self.logger, "Next candidate: {:?}", candidate);
-            self.server = candidate.socket_addr();
-            if let Some(port) = self.service_port {
-                self.server.set_port(port);
-            }
-            self.connect = Some(TcpStream::connect(self.server));
+            let candidate = track_assert_some!(
+                self.candidates.pop(),
+                Failed,
+                "No available service servers"
+            );
+            let addr = candidate.socket_addr(self.service_port);
+            debug!(self.logger, "Next candidate server is {}", addr);
+            self.connect = Some(TcpStream::connect(addr));
+            self.server = Some(candidate);
         }
         match track!(self.connect.poll().map_err(Error::from)) {
             Err(e) => {
-                warn!(self.logger, "Cannot connect to a server: {}", e);
+                let server = self.server.take().expect("Never fails");
+                warn!(
+                    self.logger,
+                    "Cannot connect to the server {}; {}",
+                    server.socket_addr(self.service_port),
+                    e
+                );
                 self.connect = None;
                 self.poll()
             }
             Ok(Async::Ready(Some(stream))) => {
-                info!(self.logger, "Connected to the server {}", self.server);
-                Ok(Async::Ready((stream, self.server)))
+                let server = self.server.as_ref().take().expect("Never fails");
+                let addr = server.socket_addr(self.service_port);
+                info!(self.logger, "Connected to the server {}", addr);
+                Ok(Async::Ready((stream, addr)))
             }
             _ => Ok(Async::NotReady),
         }
