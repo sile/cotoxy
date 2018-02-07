@@ -2,6 +2,12 @@
 name = "cotoxy"
 version = "0.1.0"
 authors = ["Takeru Ohta <phjgt308@gmail.com>"]
+description = "A TCP proxy using Consul for service discovery"
+homepage = "https://github.com/sile/cotoxy"
+repository = "https://github.com/sile/cotoxy"
+readme = "README.md"
+keywords = ["consul", "proxy", "tcp"]
+license = "MIT"
 
 [dependencies]
 clap = "2"
