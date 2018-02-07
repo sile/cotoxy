@@ -13,10 +13,13 @@ use clap::{App, Arg};
 use cotoxy::Error;
 use cotoxy::ProxyServerBuider;
 use fibers::{Executor, Spawn};
-use fibers::executor::InPlaceExecutor;
+use fibers::executor::{InPlaceExecutor, ThreadPoolExecutor};
 use sloggers::Build;
 use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::SourceLocation;
+
+const SERVICE_PORT_DEFAULT: &str = "<Port number registered in Consul>";
+const DC_DEFAULT: &str = "<Datacenter of the consul agent being queried>";
 
 macro_rules! try_parse {
     ($expr:expr) => { track_try_unwrap!($expr.parse().map_err(Error::from)) }
@@ -27,6 +30,12 @@ fn main() {
         .version(env!("CARGO_PKG_VERSION"))
         .about(env!("CARGO_PKG_DESCRIPTION"))
         .arg(
+            Arg::with_name("SERVICE")
+                .help("Name of the service to which clients connect")
+                .index(1)
+                .required(true),
+        )
+        .arg(
             Arg::with_name("LOG_LEVEL")
                 .long("log-level")
                 .takes_value(true)
@@ -35,41 +44,70 @@ fn main() {
         )
         .arg(
             Arg::with_name("BIND_ADDR")
+                .help("TCP address to which the proxy bind")
                 .long("bind-addr")
                 .takes_value(true)
                 .default_value("0.0.0.0:17382"),
         )
         .arg(
             Arg::with_name("CONSUL_ADDR")
+                .help("TCP address of the consul agent which the proxy queries")
                 .long("consul-addr")
                 .takes_value(true)
                 .default_value("127.0.0.1:8500"),
         )
         .arg(
-            Arg::with_name("SERVICE")
-                .short("s")
-                .long("service")
+            Arg::with_name("SERVICE_PORT")
+                .help("Port number of the service")
+                .long("service-port")
                 .takes_value(true)
-                .required(true),
+                .default_value(SERVICE_PORT_DEFAULT),
         )
         .arg(
-            Arg::with_name("SERVICE_PORT")
-                .long("service-port")
+            Arg::with_name("DC")
+                .help("Datacenter to query")
+                .long("dc")
+                .takes_value(true)
+                .default_value(DC_DEFAULT),
+        )
+        .arg(
+            Arg::with_name("TAG")
+                .help("Tag to filter service nodes on")
+                .long("tag")
                 .takes_value(true),
         )
-        .arg(Arg::with_name("DC").long("dc").takes_value(true))
-        .arg(Arg::with_name("TAG").long("tag").takes_value(true))
-        .arg(Arg::with_name("NEAR").long("near").takes_value(true))
+        .arg(
+            Arg::with_name("NEAR")
+                .long_help(
+                    "Node name to sort the service node list in ascending order \
+                     based on the estimated round trip time from that node. \
+                     If `_agent` is specified, \
+                     the node of the consul agent being queried will be used for the sort.",
+                )
+                .long("near")
+                .takes_value(true),
+        )
         .arg(
             Arg::with_name("NODE_META")
+                .long_help(
+                    "Node metadata key/value pair of the form `key:value`. \
+                     Service nodes will be filtered with the specified key/value pairs.",
+                )
                 .long("node-meta")
                 .takes_value(true)
                 .multiple(true),
+        )
+        .arg(
+            Arg::with_name("THREADS")
+                .help("Number of worker threads")
+                .takes_value(true)
+                .default_value("1"),
         )
         .get_matches();
     let bind_addr: SocketAddr = try_parse!(matches.value_of("BIND_ADDR").unwrap());
     let consul_addr: SocketAddr = try_parse!(matches.value_of("CONSUL_ADDR").unwrap());
     let service = matches.value_of("SERVICE").unwrap().to_owned();
+    let threads: usize = try_parse!(matches.value_of("THREADS").unwrap());
     let log_level = try_parse!(matches.value_of("LOG_LEVEL").unwrap());
     let logger = track_try_unwrap!(
         TerminalLoggerBuilder::new()
@@ -79,7 +117,6 @@ fn main() {
             .build()
     );
 
-    let mut executor = InPlaceExecutor::new().unwrap();
     let logger = logger.new(o!("proxy" => bind_addr.to_string(), "service" => service.clone()));
 
     let mut proxy = ProxyServerBuider::new(&service);
@@ -87,11 +124,15 @@ fn main() {
 
     proxy.consul().consul_addr(consul_addr);
     if let Some(service_port) = matches.value_of("SERVICE_PORT") {
-        let service_port: u16 = try_parse!(service_port);
-        proxy.service_port(service_port);
+        if service_port != SERVICE_PORT_DEFAULT {
+            let service_port: u16 = try_parse!(service_port);
+            proxy.service_port(service_port);
+        }
     }
     if let Some(dc) = matches.value_of("DC") {
-        proxy.consul().dc(dc);
+        if dc != DC_DEFAULT {
+            proxy.consul().dc(dc);
+        }
     }
     if let Some(tag) = matches.value_of("TAG") {
         proxy.consul().tag(tag);
@@ -108,6 +149,17 @@ fn main() {
         }
     }
 
+    if threads == 1 {
+        execute(InPlaceExecutor::new().unwrap(), &proxy);
+    } else {
+        execute(
+            ThreadPoolExecutor::with_thread_count(threads).unwrap(),
+            &proxy,
+        );
+    }
+}
+
+fn execute<E: Executor + Spawn>(mut executor: E, proxy: &ProxyServerBuider) {
     let proxy = proxy.finish(executor.handle());
     let fiber = executor.spawn_monitor(proxy);
     track_try_unwrap!(executor.run_fiber(fiber).unwrap().map_err(Error::from));

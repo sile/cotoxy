@@ -214,7 +214,7 @@ where
     if addr.is_empty() {
         Ok(None)
     } else {
-        let addr = addr.parse().map_err(|e| de::Error::custom(e))?;
+        let addr = addr.parse().map_err(de::Error::custom)?;
         Ok(Some(addr))
     }
 }
