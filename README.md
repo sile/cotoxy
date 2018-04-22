@@ -62,6 +62,9 @@ If you have already installed [Cargo][cargo], you can install `cotoxy` easily in
 $ cargo install cotoxy
 ```
 
+[cargo]: https://doc.rust-lang.org/cargo/
+[releases]: https://github.com/sile/cotoxy/releases
+
 Examples
 --------
 
