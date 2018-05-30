@@ -1,3 +1,4 @@
+#[macro_use]
 extern crate clap;
 extern crate cotoxy;
 extern crate fibers;
@@ -8,7 +9,7 @@ extern crate sloggers;
 #[macro_use]
 extern crate trackable;
 
-use clap::{App, Arg};
+use clap::Arg;
 use cotoxy::Error;
 use cotoxy::ProxyServerBuilder;
 use fibers::executor::{InPlaceExecutor, ThreadPoolExecutor};
@@ -29,9 +30,7 @@ macro_rules! try_parse {
 }
 
 fn main() {
-    let matches = App::new("cotoxy")
-        .version(env!("CARGO_PKG_VERSION"))
-        .about(env!("CARGO_PKG_DESCRIPTION"))
+    let matches = app_from_crate!()
         .arg(
             Arg::with_name("SERVICE")
                 .help("Name of the service to which clients connect")
