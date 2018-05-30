@@ -1,17 +1,17 @@
-use std::net::SocketAddr;
-use std::time::Duration;
-use fibers::Spawn;
-use fibers::net::{TcpListener, TcpStream};
 use fibers::net::futures::{Connect, TcpListenerBind};
 use fibers::net::streams::Incoming;
+use fibers::net::{TcpListener, TcpStream};
 use fibers::time::timer::{TimeoutAfter, TimerExt};
+use fibers::Spawn;
 use futures::{Async, Future, Poll, Stream};
 use slog::{Discard, Logger};
+use std::net::SocketAddr;
+use std::time::Duration;
 use trackable::error::Failed;
 
-use {AsyncResult, ConsulSettings, Error};
 use consul::{ConsulClient, ServiceNode};
 use proxy_channel::ProxyChannel;
+use {AsyncResult, ConsulSettings, Error};
 
 /// A builder for `ProxyServer`.
 #[derive(Debug, Clone)]

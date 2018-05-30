@@ -1,6 +1,6 @@
-use std;
 use fibers::sync::oneshot::MonitorError;
 use sloggers;
+use std;
 use trackable::error::{ErrorKindExt, Failed, TrackableError};
 
 /// This crate specific `Error` type.

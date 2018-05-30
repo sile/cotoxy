@@ -1,7 +1,7 @@
-use std::io::{self, Read, Write};
-use slog::Logger;
 use fibers::net::TcpStream;
 use futures::{Async, Future, Poll};
+use slog::Logger;
+use std::io::{self, Read, Write};
 
 use {Error, Result};
 

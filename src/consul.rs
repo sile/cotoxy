@@ -1,15 +1,15 @@
-use std;
-use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
 use futures::Future;
 use serde::de;
 use serde::{Deserialize, Deserializer};
 use serdeconv;
+use std;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use trackable::error::{ErrorKindExt, Failed};
 use url::Url;
 
-use {AsyncResult, Error};
 use http;
+use {AsyncResult, Error};
 
 /// Settings for Consul.
 #[derive(Debug, Clone)]

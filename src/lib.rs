@@ -19,11 +19,11 @@ extern crate url;
 macro_rules! track_err {
     ($future:expr) => {
         $future.map_err(|e| track!(::Error::from(e)))
-    }
+    };
 }
 
-pub use error::Error;
 pub use consul::ConsulSettings;
+pub use error::Error;
 pub use proxy_server::{ProxyServer, ProxyServerBuilder};
 
 mod consul;

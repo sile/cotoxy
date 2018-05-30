@@ -8,22 +8,24 @@ extern crate sloggers;
 #[macro_use]
 extern crate trackable;
 
-use std::net::SocketAddr;
-use std::time::Duration;
 use clap::{App, Arg};
 use cotoxy::Error;
 use cotoxy::ProxyServerBuilder;
-use fibers::{Executor, Spawn};
 use fibers::executor::{InPlaceExecutor, ThreadPoolExecutor};
-use sloggers::Build;
+use fibers::{Executor, Spawn};
 use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::SourceLocation;
+use sloggers::Build;
+use std::net::SocketAddr;
+use std::time::Duration;
 
 const SERVICE_PORT_DEFAULT: &str = "<Port number registered in Consul>";
 const DC_DEFAULT: &str = "<Datacenter of the consul agent being queried>";
 
 macro_rules! try_parse {
-    ($expr:expr) => { track_try_unwrap!($expr.parse().map_err(Error::from)) }
+    ($expr:expr) => {
+        track_try_unwrap!($expr.parse().map_err(Error::from))
+    };
 }
 
 fn main() {

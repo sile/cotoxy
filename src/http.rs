@@ -1,9 +1,9 @@
-use std::net::SocketAddr;
 use futures::Future;
-use miasht::Client as HttpClient;
-use miasht::Method;
 use miasht::builtin::headers::{Connection, ContentLength};
 use miasht::builtin::{FutureExt, IoExt};
+use miasht::Client as HttpClient;
+use miasht::Method;
+use std::net::SocketAddr;
 use trackable::error::{ErrorKindExt, Failed};
 use url::Url;
 
