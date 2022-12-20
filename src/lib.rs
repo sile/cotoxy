@@ -6,7 +6,6 @@ extern crate fibers;
 extern crate futures;
 extern crate miasht;
 extern crate serde;
-#[macro_use]
 extern crate serde_derive;
 extern crate serdeconv;
 #[macro_use]
@@ -35,4 +34,4 @@ mod proxy_server;
 /// This crate specific `Result` type.
 pub type Result<T> = std::result::Result<T, Error>;
 
-type AsyncResult<T> = Box<futures::Future<Item = T, Error = Error> + Send + 'static>;
+type AsyncResult<T> = Box<dyn futures::Future<Item = T, Error = Error> + Send + 'static>;

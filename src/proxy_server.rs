@@ -212,7 +212,7 @@ impl Future for SelectServer {
                 self.poll()
             }
             Ok(Async::Ready(Some(stream))) => {
-                let server = self.server.as_ref().take().expect("Never fails");
+                let server = self.server.as_ref().expect("Never fails");
                 let addr = server.socket_addr(self.service_port);
                 info!(self.logger, "Connected to the server {}", addr);
                 Ok(Async::Ready((stream, addr)))

@@ -81,10 +81,8 @@ impl ProxyChannel {
     pub const DEFAULT_BUFFER_SIZE: usize = 8 * 1024;
 
     pub fn new(logger: Logger, client: TcpStream, server: TcpStream) -> Self {
-        unsafe {
-            let _ = client.with_inner(|socket| socket.set_nodelay(true));
-            let _ = server.with_inner(|socket| socket.set_nodelay(true));
-        }
+        let _ = client.with_inner(|socket| socket.set_nodelay(true));
+        let _ = server.with_inner(|socket| socket.set_nodelay(true));
         ProxyChannel {
             logger,
             client,
