@@ -16,7 +16,7 @@ futures = "0.1"
 miasht = "0.0"
 serde = "1"
 serde_derive = "1"
-serdeconv = "0.3"
+serdeconv = "0.4"
 slog = {version = "2", features = ["release_max_level_debug"]}
 sloggers = "2"
 trackable = "1"
