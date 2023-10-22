@@ -10,7 +10,7 @@ keywords = ["consul", "proxy", "tcp"]
 license = "MIT"
 
 [dependencies]
-clap = "2"
+clap = { version = "4", features = ["derive"] }
 env_logger = "0.10.0"
 fibers = "0.1"
 futures = "0.1"
