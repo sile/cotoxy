@@ -11,13 +11,12 @@ license = "MIT"
 
 [dependencies]
 clap = "2"
+env_logger = "0.10.0"
 fibers = "0.1"
 futures = "0.1"
+log = "0.4.20"
 miasht = "0.0"
-serde = "1"
-serde_derive = "1"
+serde = { version = "1", features = ["derive"] }
 serdeconv = "0.4"
-slog = {version = "2", features = ["release_max_level_debug"]}
-sloggers = "2"
 trackable = "1"
 url = "1"

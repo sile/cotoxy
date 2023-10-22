@@ -1,5 +1,4 @@
 use fibers::sync::oneshot::MonitorError;
-use sloggers;
 use std;
 use trackable::error::{ErrorKindExt, Failed, TrackableError};
 
@@ -19,11 +18,6 @@ impl From<std::net::AddrParseError> for Error {
 }
 impl From<std::num::ParseIntError> for Error {
     fn from(f: std::num::ParseIntError) -> Self {
-        Failed.cause(f).into()
-    }
-}
-impl From<sloggers::Error> for Error {
-    fn from(f: sloggers::Error) -> Self {
         Failed.cause(f).into()
     }
 }

@@ -6,11 +6,7 @@ extern crate fibers;
 extern crate futures;
 extern crate miasht;
 extern crate serde;
-extern crate serde_derive;
 extern crate serdeconv;
-#[macro_use]
-extern crate slog;
-extern crate sloggers;
 #[macro_use]
 extern crate trackable;
 extern crate url;

@@ -4,9 +4,6 @@ extern crate cotoxy;
 extern crate fibers;
 extern crate futures;
 #[macro_use]
-extern crate slog;
-extern crate sloggers;
-#[macro_use]
 extern crate trackable;
 
 use clap::Arg;
@@ -14,9 +11,6 @@ use cotoxy::Error;
 use cotoxy::ProxyServerBuilder;
 use fibers::executor::{InPlaceExecutor, ThreadPoolExecutor};
 use fibers::{Executor, Spawn};
-use sloggers::terminal::{Destination, TerminalLoggerBuilder};
-use sloggers::types::SourceLocation;
-use sloggers::Build;
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -30,19 +24,14 @@ macro_rules! try_parse {
 }
 
 fn main() {
+    env_logger::init();
+
     let matches = app_from_crate!()
         .arg(
             Arg::with_name("SERVICE")
                 .help("Name of the service to which clients connect")
                 .index(1)
                 .required(true),
-        )
-        .arg(
-            Arg::with_name("LOG_LEVEL")
-                .long("log-level")
-                .takes_value(true)
-                .default_value("info")
-                .possible_values(&["debug", "info", "warning", "error"]),
         )
         .arg(
             Arg::with_name("BIND_ADDR")
@@ -118,19 +107,8 @@ fn main() {
     let service = matches.value_of("SERVICE").unwrap().to_owned();
     let threads: usize = try_parse!(matches.value_of("THREADS").unwrap());
     let connect_timeout: u64 = try_parse!(matches.value_of("CONNECT_TIMEOUT").unwrap());
-    let log_level = try_parse!(matches.value_of("LOG_LEVEL").unwrap());
-    let logger = track_try_unwrap!(
-        TerminalLoggerBuilder::new()
-            .source_location(SourceLocation::None)
-            .destination(Destination::Stderr)
-            .level(log_level)
-            .build()
-    );
-
-    let logger = logger.new(o!("proxy" => bind_addr.to_string(), "service" => service.clone()));
-
     let mut proxy = ProxyServerBuilder::new(&service);
-    proxy.logger(logger).bind_addr(bind_addr);
+    proxy.bind_addr(bind_addr);
     proxy.connect_timeout(Duration::from_millis(connect_timeout));
 
     proxy.consul().consul_addr(consul_addr);

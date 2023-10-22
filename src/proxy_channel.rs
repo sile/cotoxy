@@ -1,6 +1,5 @@
 use fibers::net::TcpStream;
 use futures::{Async, Future, Poll};
-use slog::Logger;
 use std::io::{self, Read, Write};
 
 use {Error, Result};
@@ -71,7 +70,6 @@ impl Buffer {
 
 #[derive(Debug)]
 pub struct ProxyChannel {
-    logger: Logger,
     client: TcpStream,
     client_buf: Buffer,
     server: TcpStream,
@@ -80,11 +78,10 @@ pub struct ProxyChannel {
 impl ProxyChannel {
     pub const DEFAULT_BUFFER_SIZE: usize = 8 * 1024;
 
-    pub fn new(logger: Logger, client: TcpStream, server: TcpStream) -> Self {
+    pub fn new(client: TcpStream, server: TcpStream) -> Self {
         let _ = client.with_inner(|socket| socket.set_nodelay(true));
         let _ = server.with_inner(|socket| socket.set_nodelay(true));
         ProxyChannel {
-            logger,
             client,
             client_buf: Buffer::new(Self::DEFAULT_BUFFER_SIZE),
             server,
@@ -100,44 +97,44 @@ impl Future for ProxyChannel {
             match track!(self.client_buf.read_from(&mut self.client))? {
                 Async::NotReady => {}
                 Async::Ready(None) => {
-                    info!(self.logger, "Connection closed by client while reading");
+                    log::info!("Connection closed by client while reading");
                     return Ok(Async::Ready(()));
                 }
                 Async::Ready(Some(size)) => {
-                    debug!(self.logger, "Received {} bytes from client", size);
+                    log::debug!("Received {} bytes from client", size);
                     continue;
                 }
             }
             match track!(self.client_buf.write_to(&mut self.server))? {
                 Async::NotReady => {}
                 Async::Ready(None) => {
-                    info!(self.logger, "Connection closed by server while writing");
+                    log::info!("Connection closed by server while writing");
                     return Ok(Async::Ready(()));
                 }
                 Async::Ready(Some(size)) => {
-                    debug!(self.logger, "Sent {} bytes to server", size);
+                    log::debug!("Sent {} bytes to server", size);
                     continue;
                 }
             }
             match track!(self.server_buf.read_from(&mut self.server))? {
                 Async::NotReady => {}
                 Async::Ready(None) => {
-                    info!(self.logger, "Connection closed by server while reading");
+                    log::info!("Connection closed by server while reading");
                     return Ok(Async::Ready(()));
                 }
                 Async::Ready(Some(size)) => {
-                    debug!(self.logger, "Received {} bytes from server", size);
+                    log::debug!("Received {} bytes from server", size);
                     continue;
                 }
             }
             match track!(self.server_buf.write_to(&mut self.client))? {
                 Async::NotReady => {}
                 Async::Ready(None) => {
-                    info!(self.logger, "Connection closed by client while writing");
+                    log::info!("Connection closed by client while writing");
                     return Ok(Async::Ready(()));
                 }
                 Async::Ready(Some(size)) => {
-                    debug!(self.logger, "Sent {} bytes to client", size);
+                    log::debug!("Sent {} bytes to client", size);
                     continue;
                 }
             }

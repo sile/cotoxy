@@ -4,7 +4,6 @@ use fibers::net::{TcpListener, TcpStream};
 use fibers::time::timer::{TimeoutAfter, TimerExt};
 use fibers::Spawn;
 use futures::{Async, Future, Poll, Stream};
-use slog::{Discard, Logger};
 use std::net::SocketAddr;
 use std::time::Duration;
 use trackable::error::Failed;
@@ -16,7 +15,6 @@ use {AsyncResult, ConsulSettings, Error};
 /// A builder for `ProxyServer`.
 #[derive(Debug, Clone)]
 pub struct ProxyServerBuilder {
-    logger: Logger,
     bind_addr: SocketAddr,
     consul: ConsulSettings,
     service_port: Option<u16>,
@@ -32,20 +30,11 @@ impl ProxyServerBuilder {
     /// Makes a new `ProxyServerBuilder` for the given service.
     pub fn new(service: &str) -> Self {
         ProxyServerBuilder {
-            logger: Logger::root(Discard, o!()),
             bind_addr: Self::DEFAULT_BIND_ADDR.parse().expect("Never fails"),
             consul: ConsulSettings::new(service),
             service_port: None,
             connect_timeout: Duration::from_millis(Self::DEFAULT_CONNECT_TIMEOUT_MS),
         }
-    }
-
-    /// Sets the logger of the server.
-    ///
-    /// The default value is `Logger::root(Discard, o!())`.
-    pub fn logger(&mut self, logger: Logger) -> &mut Self {
-        self.logger = logger;
-        self
     }
 
     /// Sets the address to which the server bind.
@@ -80,9 +69,8 @@ impl ProxyServerBuilder {
     /// Builds a new proxy server with the specified settings.
     pub fn finish<S: Spawn>(&self, spawner: S) -> ProxyServer<S> {
         let consul = self.consul.client();
-        debug!(self.logger, "Consul query url: {}", consul.query_url());
+        log::debug!("Consul query url: {}", consul.query_url());
         ProxyServer {
-            logger: self.logger.clone(),
             spawner,
             consul,
             bind: Some(TcpListener::bind(self.bind_addr)),
@@ -95,7 +83,6 @@ impl ProxyServerBuilder {
 
 /// Proxy server.
 pub struct ProxyServer<S> {
-    logger: Logger,
     spawner: S,
     consul: ConsulClient,
     bind: Option<TcpListenerBind>,
@@ -116,32 +103,25 @@ impl<S: Spawn> Future for ProxyServer<S> {
     type Error = Error;
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         if let Async::Ready(Some(listener)) = track!(self.bind.poll().map_err(Error::from))? {
-            info!(self.logger, "Proxy server started");
+            log::info!("Proxy server started");
             self.incoming = Some(listener.incoming());
             self.bind = None;
         }
         if let Some(ref mut incoming) = self.incoming {
-            if let Async::Ready(Some((client, addr))) =
+            if let Async::Ready(Some((client, _addr))) =
                 track!(incoming.poll().map_err(Error::from))?
             {
-                let logger = self.logger.new(o!("client" => addr.to_string()));
-                let error_logger = logger.clone();
-                let server = SelectServer::new(
-                    logger.clone(),
-                    &self.consul,
-                    self.service_port,
-                    self.connect_timeout,
-                );
+                let server =
+                    SelectServer::new(&self.consul, self.service_port, self.connect_timeout);
                 self.spawner.spawn(
                     track_err!(client)
                         .and_then(move |client| {
-                            track_err!(server).and_then(move |(server, addr)| {
-                                let logger = logger.new(o!("server" => addr.to_string()));
-                                track_err!(ProxyChannel::new(logger, client, server))
+                            track_err!(server).and_then(move |(server, _addr)| {
+                                track_err!(ProxyChannel::new(client, server))
                             })
                         })
                         .map_err(move |e| {
-                            error!(error_logger, "Proxy channel terminated abnormally: {}", e);
+                            log::error!("Proxy channel terminated abnormally: {}", e);
                         }),
                 );
             }
@@ -151,7 +131,6 @@ impl<S: Spawn> Future for ProxyServer<S> {
 }
 
 struct SelectServer {
-    logger: Logger,
     collect_candidates: Option<AsyncResult<Vec<ServiceNode>>>,
     connect: Option<TimeoutAfter<Connect>>,
     candidates: Vec<ServiceNode>,
@@ -160,14 +139,8 @@ struct SelectServer {
     connect_timeout: Duration,
 }
 impl SelectServer {
-    fn new(
-        logger: Logger,
-        consul: &ConsulClient,
-        service_port: Option<u16>,
-        connect_timeout: Duration,
-    ) -> Self {
+    fn new(consul: &ConsulClient, service_port: Option<u16>, connect_timeout: Duration) -> Self {
         SelectServer {
-            logger,
             collect_candidates: Some(consul.find_candidates()),
             connect: None,
             candidates: Vec::new(),
@@ -182,7 +155,7 @@ impl Future for SelectServer {
     type Error = Error;
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         if let Async::Ready(Some(candidates)) = track!(self.collect_candidates.poll())? {
-            debug!(self.logger, "Candidates: {:?}", candidates);
+            log::debug!("Candidates: {:?}", candidates);
             self.candidates = candidates;
             self.candidates.reverse();
             self.collect_candidates = None;
@@ -194,15 +167,14 @@ impl Future for SelectServer {
                 "No available service servers"
             );
             let addr = candidate.socket_addr(self.service_port);
-            debug!(self.logger, "Next candidate server is {}", addr);
+            log::debug!("Next candidate server is {}", addr);
             self.connect = Some(TcpStream::connect(addr).timeout_after(self.connect_timeout));
             self.server = Some(candidate);
         }
         match self.connect.poll() {
             Err(e) => {
                 let server = self.server.take().expect("Never fails");
-                warn!(
-                    self.logger,
+                log::warn!(
                     "Cannot connect to the server {}; {}",
                     server.socket_addr(self.service_port),
                     e.map(|e| e.to_string())
@@ -214,7 +186,7 @@ impl Future for SelectServer {
             Ok(Async::Ready(Some(stream))) => {
                 let server = self.server.as_ref().expect("Never fails");
                 let addr = server.socket_addr(self.service_port);
-                info!(self.logger, "Connected to the server {}", addr);
+                log::info!("Connected to the server {}", addr);
                 Ok(Async::Ready((stream, addr)))
             }
             _ => Ok(Async::NotReady),
