@@ -19,4 +19,4 @@ miasht = "0.0"
 serde = { version = "1", features = ["derive"] }
 serdeconv = "0.4"
 trackable = "1"
-url = "1"
+url = "2"
