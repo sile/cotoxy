@@ -99,7 +99,7 @@ impl ConsulSettings {
         if let Some(ref near) = self.near {
             url.query_pairs_mut().append_pair("near", near);
         }
-        for &(ref k, ref v) in &self.node_meta {
+        for (k, v) in &self.node_meta {
             url.query_pairs_mut()
                 .append_pair("node_meta", &format!("{}:{}", k, v));
         }
@@ -126,6 +126,7 @@ impl ConsulClient {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct ServiceNode {
     #[serde(rename = "ID")]
     pub id: String,
@@ -151,7 +152,10 @@ pub struct ServiceNode {
     #[serde(rename = "ModifyIndex")]
     pub modify_index: u64,
 
-    #[serde(rename = "ServiceAddress", deserialize_with = "deserialize_maybe_ipaddr")]
+    #[serde(
+        rename = "ServiceAddress",
+        deserialize_with = "deserialize_maybe_ipaddr"
+    )]
     pub service_address: Option<IpAddr>,
 
     #[serde(rename = "ServiceEnableTagOverride")]
@@ -179,6 +183,7 @@ impl ServiceNode {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct TaggedAddresses {
     pub lan: IpAddr,
     pub wan: IpAddr,
